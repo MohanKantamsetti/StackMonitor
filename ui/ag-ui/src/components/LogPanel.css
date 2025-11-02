@@ -1,0 +1,365 @@
+.log-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 500px;
+}
+
+.log-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.log-controls-left {
+  flex: 1;
+  min-width: 250px;
+}
+
+.log-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.log-filter {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.5);
+  color: white;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+}
+
+.log-filter:focus {
+  outline: none;
+  border-color: #60a5fa;
+  background: rgba(15, 23, 42, 0.7);
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+}
+
+.log-filter::placeholder {
+  color: #64748b;
+}
+
+.auto-refresh-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.875rem;
+  color: #cbd5e1;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.auto-refresh-toggle:hover {
+  background: rgba(51, 65, 85, 0.5);
+}
+
+.auto-refresh-toggle input[type="checkbox"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+
+.back-to-live-button {
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(96, 165, 250, 0.5);
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.back-to-live-button:hover {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: rgba(96, 165, 250, 0.7);
+  transform: translateX(-2px);
+}
+
+.refresh-button {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 6px;
+  background: rgba(51, 65, 85, 0.5);
+  color: #cbd5e1;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+}
+
+.refresh-button:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.5);
+  transform: rotate(180deg);
+}
+
+.log-count {
+  font-size: 0.875rem;
+  color: #94a3b8;
+  padding: 0.5rem 1rem;
+  background: rgba(51, 65, 85, 0.5);
+  border-radius: 6px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.query-badge {
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.log-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.5);
+  padding: 0.5rem;
+  max-height: 600px;
+}
+
+.log-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  transition: all 0.2s ease;
+  border-left: 3px solid transparent;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.log-entry:hover {
+  background: rgba(51, 65, 85, 0.7);
+  transform: translateX(4px);
+}
+
+.log-entry.log-error {
+  background: rgba(239, 68, 68, 0.1);
+  border-left-color: #ef4444;
+}
+
+.log-entry.log-error:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.log-entry.log-warn {
+  background: rgba(251, 191, 36, 0.1);
+  border-left-color: #fbbf24;
+}
+
+.log-entry.log-warn:hover {
+  background: rgba(251, 191, 36, 0.2);
+}
+
+.log-entry.log-info {
+  background: rgba(52, 211, 153, 0.1);
+  border-left-color: #34d399;
+}
+
+.log-entry.log-info:hover {
+  background: rgba(52, 211, 153, 0.2);
+}
+
+.log-entry.log-debug {
+  background: rgba(148, 163, 184, 0.1);
+  border-left-color: #94a3b8;
+}
+
+.log-entry.log-debug:hover {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.log-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.log-timestamp {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 140px;
+}
+
+.log-level {
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  min-width: 60px;
+  text-align: center;
+}
+
+.log-error .log-level {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.log-warn .log-level {
+  color: #fcd34d;
+  background: rgba(251, 191, 36, 0.2);
+}
+
+.log-info .log-level {
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, 0.2);
+}
+
+.log-debug .log-level {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.log-source {
+  color: #60a5fa;
+  font-weight: 500;
+  flex-shrink: 0;
+  min-width: 100px;
+}
+
+.log-message {
+  color: #e2e8f0;
+  flex: 1;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.log-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #94a3b8;
+  text-align: center;
+  padding: 2rem;
+}
+
+.log-empty p {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+  color: #cbd5e1;
+}
+
+.log-empty small {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(148, 163, 184, 0.2);
+  border-top-color: #60a5fa;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .log-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .log-controls-right {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 768px) {
+  .log-entry {
+    flex-wrap: wrap;
+    font-size: 0.8rem;
+  }
+
+  .log-timestamp {
+    min-width: auto;
+  }
+
+  .log-source {
+    min-width: auto;
+  }
+
+  .log-message {
+    width: 100%;
+    margin-top: 0.5rem;
+  }
+}
+
+/* Scrollbar Styling */
+.log-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.log-list::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 4px;
+}
+
+.log-list::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.5);
+  border-radius: 4px;
+}
+
+.log-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(96, 165, 250, 0.7);
+}

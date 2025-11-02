@@ -1,0 +1,122 @@
+# Docker Compose configuration for StackMonitor PoC
+# Remove version as it's deprecated in newer Docker Compose versions
+
+services:
+  log-generator:
+    build: ./log-generator
+    volumes:
+      - logs-data:/logs
+    environment:
+      - ERROR_RATE=0.20      # 20% error logs
+      - WARN_RATE=0.25       # 25% warning logs
+      - LOG_RATE=1.0         # 1 log per second
+      - DEBUG_MODE=false     # Set to true to see logs in console
+    restart: unless-stopped
+
+  go-agent:
+    build: ./agents/go-agent
+    depends_on:
+      - config-service
+      - ingestion-service
+    volumes:
+      - logs-data:/logs:ro
+    environment:
+      - AGENT_ID=go-agent-1
+      - CONFIG_URL=config-service:8080
+      - INGESTION_URL=ingestion-service:50051
+    restart: unless-stopped
+
+  python-agent:
+    build: ./agents/python-agent
+    depends_on:
+      - config-service
+      - ingestion-service
+    volumes:
+      - logs-data:/logs:ro
+    environment:
+      - AGENT_ID=python-agent-1
+      - CONFIG_URL=config-service:8080
+      - INGESTION_URL=ingestion-service:50051
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+      - CLICKHOUSE_PASSWORD=
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-client:latest
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./services/ingestion-service/init-db.sh:/init-db.sh
+    command: /bin/bash -c "sleep 5 && /bin/bash /init-db.sh"
+    restart: "no"
+
+  ingestion-service:
+    build: ./services/ingestion-service
+    ports:
+      - "50051:50051"
+    depends_on:
+      - clickhouse-init
+    environment:
+      - CLICKHOUSE_ADDR=clickhouse:9000
+    restart: unless-stopped
+
+  config-service:
+    build: ./services/config-service
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/config:ro
+    restart: unless-stopped
+
+  api-server:
+    build: ./services/api-server
+    ports:
+      - "5000:5000"
+    depends_on:
+      - clickhouse-init
+    environment:
+      - CLICKHOUSE_ADDR=clickhouse:9000
+    restart: unless-stopped
+
+  mcp-server:
+    build: ./services/mcp-server
+    ports:
+      - "5001:5001"
+    depends_on:
+      - api-server
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - USE_LLM=${USE_LLM:-false}
+      - API_SERVER_URL=${API_SERVER_URL:-http://api-server:5000}
+    restart: unless-stopped
+
+  ag-ui:
+    build: ./ui/ag-ui
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mcp-server
+      - api-server
+    restart: unless-stopped
+
+volumes:
+  logs-data:
+  clickhouse-data:

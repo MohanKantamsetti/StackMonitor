@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "stackmonitor": {
+      "url": "http://localhost:5001",
+      "name": "StackMonitor Log Analysis",
+      "description": "Query and analyze logs from StackMonitor system",
+      "endpoints": {
+        "query": {
+          "path": "/mcp/query",
+          "method": "POST",
+          "description": "Send natural language queries about logs and metrics"
+        }
+      },
+      "examples": [
+        "What are the recent errors?",
+        "Show me error rate trends for the last hour",
+        "Describe my logs",
+        "Show me nginx logs",
+        "What warnings occurred recently?"
+      ],
+      "capabilities": [
+        "Fetch recent logs with filters (level, service, limit)",
+        "Analyze error rates and trends",
+        "Generate natural language summaries of log data",
+        "Query logs by source (tomcat, nginx, application)",
+        "Count logs by severity level"
+      ]
+    }
+  }
+}
+

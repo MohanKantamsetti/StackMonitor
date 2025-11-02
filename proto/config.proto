@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package configproto;
+
+option go_package = "stackmonitor.com/configproto";
+
+service ConfigService {
+  rpc GetConfig(ConfigRequest) returns (ConfigResponse);
+}
+
+message ConfigRequest {
+  string agent_id = 1;
+  string current_config_version = 2;
+}
+
+message ConfigResponse {
+  string config_version = 1;
+  bytes config_payload = 2;
+}
