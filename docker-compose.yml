@@ -102,6 +102,8 @@ services:
       - "5001:5001"
     depends_on:
       - api-server
+    env_file:
+      - .env
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - USE_LLM=${USE_LLM:-false}
