@@ -1,0 +1,28 @@
+.metrics-chart {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.metrics-header {
+  margin-bottom: 15px;
+}
+
+.metrics-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.metrics-content {
+  min-height: 300px;
+}
+
+.no-metrics {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+}
+

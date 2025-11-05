@@ -1,0 +1,138 @@
+version: '3.8'
+
+services:
+  log-generator:
+    build:
+      context: ./log-generator
+      dockerfile: Dockerfile
+    volumes:
+      - logs-data:/logs
+    restart: unless-stopped
+
+  go-agent:
+    build:
+      context: ./agents/go-agent
+      dockerfile: Dockerfile
+    depends_on:
+      - config-service
+      - ingestion-service
+    volumes:
+      - logs-data:/logs:ro
+    environment:
+      - AGENT_ID=go-agent-1
+      - CONFIG_URL=config-service:8080
+      - INGESTION_URL=ingestion-service:50051
+    restart: unless-stopped
+
+  python-agent:
+    build:
+      context: ./agents/python-agent
+      dockerfile: Dockerfile
+    depends_on:
+      - config-service
+      - ingestion-service
+    volumes:
+      - logs-data:/logs:ro
+    environment:
+      - AGENT_ID=python-agent-1
+      - CONFIG_URL=config-service:8080
+      - INGESTION_URL=ingestion-service:50051
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_DB=stackmonitor
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-client:latest
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./services/ingestion-service/init-db.sh:/init-db.sh
+    command: /bin/bash -c "sleep 5 && /bin/bash /init-db.sh"
+    restart: "no"
+
+  ingestion-service:
+    build:
+      context: ./services/ingestion-service
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+    depends_on:
+      - clickhouse-init
+    environment:
+      - CLICKHOUSE_ADDR=clickhouse:9000
+    restart: unless-stopped
+
+  config-service:
+    build:
+      context: ./services/config-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/config:ro
+    restart: unless-stopped
+
+  api-server:
+    build:
+      context: ./services/api-server
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    depends_on:
+      - clickhouse-init
+    environment:
+      - CLICKHOUSE_ADDR=clickhouse:9000
+    restart: unless-stopped
+
+  mcp-server:
+    build:
+      context: ./services/mcp-server
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    depends_on:
+      - api-server
+    env_file:
+      - .env
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - USE_LLM=${USE_LLM:-true}
+      - API_SERVER_URL=${API_SERVER_URL:-http://api-server:5000}
+    restart: unless-stopped
+
+  ag-ui:
+    build:
+      context: ./ui/ag-ui
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mcp-server
+      - api-server
+    restart: unless-stopped
+
+volumes:
+  logs-data:
+  clickhouse-data:

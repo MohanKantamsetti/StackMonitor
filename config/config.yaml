@@ -1,0 +1,35 @@
+# PoC config based on Chapter 4.15
+version: "v1.0.1"
+
+agent_settings:
+  poll_interval: "60s"
+  batch_size_kb: 64
+  batch_window: "10s"
+
+sampling:
+  base_rates:
+    ERROR: 1.0
+    WARN: 0.5
+    INFO: 0.1
+    DEBUG: 0.01
+  content_rules:
+    - pattern: "OutOfMemory"
+      rate: 1.0
+    - pattern: "Database timeout"
+      rate: 1.0
+
+# This section is for the API/Ingestion server
+retention_policies:
+  default:
+    hot_days: 7
+    warm_days: 30
+    cold_days: 90
+  by_level:
+    ERROR:
+      hot_days: 14
+      archive: true
+    DEBUG:
+      hot_days: 1
+      warm_days: 0
+      cold_days: 0
+
