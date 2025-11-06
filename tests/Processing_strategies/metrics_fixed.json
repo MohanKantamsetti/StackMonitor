@@ -1,0 +1,10 @@
+{
+  "strategy": "fixed",
+  "logs_received": 118322,
+  "total_bytes": 11853766,
+  "bandwidth_mbps": 1.53,
+  "latency_p50_ms": 336.64,
+  "latency_p99_ms": 665.36,
+  "latency_avg_ms": 337.45,
+  "batches_received": 362
+}

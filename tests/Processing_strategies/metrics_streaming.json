@@ -1,0 +1,10 @@
+{
+  "strategy": "streaming",
+  "logs_received": 11,
+  "total_bytes": 53348,
+  "bandwidth_mbps": 0.01,
+  "latency_p50_ms": 10.53,
+  "latency_p99_ms": 10.54,
+  "latency_avg_ms": 10.53,
+  "batches_received": 203074
+}

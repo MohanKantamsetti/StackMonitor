@@ -71,7 +71,7 @@ func main() {
 	s := &configServer{}
 	s.loadConfig()
 
-	// Watch config file for changes (PoC polling)
+	// Watch config file for changes (polling every 10s)
 	go func() {
 		for {
 			time.Sleep(10 * time.Second) // Poll file every 10s

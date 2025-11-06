@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package logproto;
+
+option go_package = "stackmonitor.com/logproto";
+
+// Service definition for log ingestion
+service LogIngestion {
+  // Unidirectional streaming: Agent sends batches
+  rpc StreamLogs(stream LogBatch) returns (stream Ack);
+}
+
+// Based on message LogBatch
+message LogBatch {
+  string agent_id = 1;
+  int64 batch_id = 2;
+  int64 timestamp_ms = 3;
+  repeated LogEntry logs = 4;
+  CompressionType compression = 5;
+  bytes compressed_payload = 6; // For compressed logs
+  int32 original_size = 7;
+  map<string, string> metadata = 8;
+}
+
+// Based on message LogEntry
+message LogEntry {
+  int64 timestamp_ns = 1;
+  string level = 2;
+  string message = 3;
+  string source = 4; // File path or service name
+  map<string, string> fields = 5;
+  string agent_id = 6; // Added for clarity
+}
+
+// Based on message Ack
+message Ack {
+  int64 batch_id = 1;
+  AckStatus status = 2;
+  string message = 3;
+  int64 server_timestamp_ms = 4;
+}
+
+enum AckStatus {
+  SUCCESS = 0;
+  RETRY = 1;
+  DROP = 2;
+}
+
+enum CompressionType {
+  NONE = 0;
+  ZSTD = 1;
+  LOGLITE = 2; // We will only implement ZSTD for the PoC
+}

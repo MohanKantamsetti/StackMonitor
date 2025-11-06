@@ -1,0 +1,40 @@
+{
+  "pure_decentralized": {
+    "approach": "pure_decentralized",
+    "logs_processed": 10000,
+    "raw_bytes": 1090798,
+    "parsed_bytes": 1670798,
+    "bandwidth_reduction": -53.17,
+    "cpu_time_sec": 0.0292,
+    "cpu_overhead_percent": 0.0,
+    "bytes_per_log_raw": 109.0,
+    "bytes_per_log_parsed": 167.0,
+    "avg_latency_ms": 0.0
+  },
+  "pure_centralized": {
+    "approach": "pure_centralized",
+    "logs_processed": 10000,
+    "raw_bytes": 1090798,
+    "parsed_bytes": 1090798,
+    "bandwidth_reduction": 0.0,
+    "agent_cpu_time_sec": 0.1,
+    "central_cpu_time_sec": 0.0111,
+    "cpu_overhead_percent": 0.0,
+    "bytes_per_log_raw": 109.0,
+    "bytes_per_log_parsed": 109.0,
+    "avg_latency_ms": 0.0
+  },
+  "hybrid": {
+    "approach": "hybrid",
+    "logs_processed": 10000,
+    "raw_bytes": 1090798,
+    "agent_parsed_bytes": 1994807,
+    "bandwidth_reduction": -82.88,
+    "agent_cpu_time_sec": 0.0183,
+    "central_cpu_time_sec": 0.0012,
+    "cpu_overhead_percent": 0.0,
+    "bytes_per_log_raw": 109.0,
+    "bytes_per_log_parsed": 199.0,
+    "avg_latency_ms": 0.0
+  }
+}

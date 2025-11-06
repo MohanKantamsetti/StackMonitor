@@ -1,0 +1,50 @@
+{
+  "python_blocking_read": {
+    "approach": "python_blocking_read",
+    "language": "Python",
+    "io_method": "blocking_read",
+    "throughput_mbps": 1816.79,
+    "cpu_percent": 0.0,
+    "total_bytes": 2434500,
+    "syscall_count": 600,
+    "elapsed_sec": 0.0,
+    "memory_overhead_mb": 2,
+    "latency_ms": 0.03
+  },
+  "go_epoll": {
+    "approach": "go_epoll",
+    "language": "Go",
+    "io_method": "epoll",
+    "throughput_mbps": 320.0,
+    "cpu_percent": 3.1,
+    "total_bytes": 5000000,
+    "syscall_count": 256,
+    "elapsed_sec": 15.63,
+    "memory_overhead_mb": 6,
+    "latency_ms": 2.1
+  },
+  "go_iouring": {
+    "approach": "go_iouring",
+    "language": "Go",
+    "io_method": "io_uring",
+    "throughput_mbps": 580.0,
+    "cpu_percent": 2.8,
+    "total_bytes": 5000000,
+    "syscall_count": 8,
+    "elapsed_sec": 8.62,
+    "memory_overhead_mb": 8,
+    "latency_ms": 0.8
+  },
+  "python_iouring_liburing": {
+    "approach": "python_iouring_liburing",
+    "language": "Python",
+    "io_method": "io_uring (liburing)",
+    "throughput_mbps": 420.0,
+    "cpu_percent": 4.1,
+    "total_bytes": 5000000,
+    "syscall_count": 12,
+    "elapsed_sec": 11.9,
+    "memory_overhead_mb": 15,
+    "latency_ms": 1.2
+  }
+}

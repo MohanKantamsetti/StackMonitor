@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -14,12 +15,14 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/klauspost/compress/zstd"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 
-	configpb "stackmonitor.com/configproto"
-	logpb "stackmonitor.com/logproto"
+	configpb "stackmonitor.com/go-agent/configproto"
+	logpb "stackmonitor.com/go-agent/logproto"
 )
 
 type AgentConfig struct {
@@ -49,9 +52,10 @@ type Agent struct {
 	stream          logpb.LogIngestion_StreamLogsClient
 	conn            *grpc.ClientConn
 	batchID         int64
+	encoder         *zstd.Encoder
 }
 
-var appLogRegex = regexp.MustCompile(`^(\S+)\s+(\S+)\s+\[(\S+)\]\s+(.*)`)
+var appLogRegex = regexp.MustCompile(`^\[([^\]]+)\]\s+\[(\S+)\]\s+\[([^\]]+)\]\s+(.*)`)
 var tomcatLogRegex = regexp.MustCompile(`^(\d{2}-[A-Za-z]{3}-\d{4}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+(\S+)\s+\[([^\]]+)\]\s+(.*)`)
 var nginxLogRegex = regexp.MustCompile(`^(\S+)\s+-\s+-\s+\[([^\]]+)\]\s+"(\S+)\s+(\S+)\s+(\S+)"\s+(\d+)\s+(\d+)\s+"([^"]+)"\s+"([^"]+)"`)
 
@@ -66,9 +70,10 @@ func (a *Agent) parseLog(line, source string) *logpb.LogEntry {
 	var err error
 
 	if matches := appLogRegex.FindStringSubmatch(line); matches != nil {
-		t, err = time.Parse(time.RFC3339Nano, matches[1])
+		// Parse timestamp format: 2025-11-02T07:10:29.920971
+		t, err = time.Parse("2006-01-02T15:04:05.000000", matches[1])
 		if err != nil {
-			t, err = time.Parse(time.RFC3339, matches[1])
+			t, err = time.Parse("2006-01-02T15:04:05", matches[1])
 		}
 		if err == nil {
 			level = matches[2]
@@ -115,7 +120,7 @@ func (a *Agent) parseLog(line, source string) *logpb.LogEntry {
 	a.mu.RLock()
 	rate, ok := a.config.Sampling.BaseRates[level]
 	if !ok {
-		rate = 0.1
+		rate = 1.0  // Default to 100% sampling
 	}
 	
 	for _, rule := range a.config.Sampling.ContentRules {
@@ -147,6 +152,26 @@ func (a *Agent) parseLog(line, source string) *logpb.LogEntry {
 }
 
 func (a *Agent) tailFile(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Printf("Failed to open %s: %v", path, err)
+		return
+	}
+	defer file.Close()
+
+	// Read existing logs first
+	scanner := bufio.NewScanner(file)
+	lineCount := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		if entry := a.parseLog(line, path); entry != nil {
+			a.logChan <- entry
+			lineCount++
+		}
+	}
+	log.Printf("Processed %d existing logs from %s", lineCount, path)
+
+	// Now watch for new lines
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Printf("Failed to create watcher for %s: %v", path, err)
@@ -159,15 +184,6 @@ func (a *Agent) tailFile(path string) {
 		return
 	}
 
-	file, err := os.Open(path)
-	if err != nil {
-		log.Printf("Failed to open %s: %v", path, err)
-		return
-	}
-	defer file.Close()
-
-	file.Seek(0, io.SeekEnd)
-
 	for {
 		select {
 		case event := <-watcher.Events:
@@ -175,7 +191,6 @@ func (a *Agent) tailFile(path string) {
 				data := make([]byte, 4096)
 				n, err := file.Read(data)
 				if err != nil && err != io.EOF {
-					log.Printf("Error reading file: %v", err)
 					continue
 				}
 				if n > 0 {
@@ -245,19 +260,39 @@ func (a *Agent) sendBatch(logs []*logpb.LogEntry) {
 	}
 
 	a.batchID++
+	
+	// Serialize logs to bytes
+	var logBytes []byte
+	for _, log := range logs {
+		logData, err := proto.Marshal(log)
+		if err != nil {
+			continue
+		}
+		logBytes = append(logBytes, logData...)
+	}
+	
+	originalSize := len(logBytes)
+	
+	// Compress with ZSTD
+	compressed := a.encoder.EncodeAll(logBytes, make([]byte, 0, len(logBytes)))
+	
 	batch := &logpb.LogBatch{
-		AgentId:      a.id,
-		BatchId:      a.batchID,
-		TimestampMs:  time.Now().UnixMilli(),
-		Logs:         logs,
-		Compression:  logpb.CompressionType_NONE,
-		Metadata:     make(map[string]string),
+		AgentId:           a.id,
+		BatchId:           a.batchID,
+		TimestampMs:       time.Now().UnixMilli(),
+		Logs:              logs, // Keep for backward compat
+		Compression:       logpb.CompressionType_ZSTD,
+		CompressedPayload: compressed,
+		OriginalSize:      int32(originalSize),
+		Metadata:          make(map[string]string),
 	}
 
 	if err := a.stream.Send(batch); err != nil {
 		log.Printf("Failed to send batch: %v", err)
 	} else {
-		log.Printf("Sent batch %d with %d logs", a.batchID, len(logs))
+		ratio := float64(originalSize) / float64(len(compressed))
+		log.Printf("Sent batch %d with %d logs (compressed %d->%d bytes, %.2fx)", 
+			a.batchID, len(logs), originalSize, len(compressed), ratio)
 	}
 }
 
@@ -279,12 +314,12 @@ func (a *Agent) configPoller() {
 
 		if err != nil {
 			log.Printf("Failed to get config: %v", err)
-		} else if resp.ConfigVersion != currentVersion && len(resp.ConfigPayload) > 0 {
+		} else if resp.Version != currentVersion && len(resp.ConfigPayload) > 0 {
 			var newConfig AgentConfig
 			if err := yaml.Unmarshal(resp.ConfigPayload, &newConfig); err == nil {
 				a.mu.Lock()
 				a.config = &newConfig
-				a.configVersion = resp.ConfigVersion
+				a.configVersion = resp.Version
 				a.mu.Unlock()
 				log.Printf("Config reloaded to version %s", newConfig.Version)
 			}
@@ -324,6 +359,11 @@ func main() {
 	defer ingestionConn.Close()
 	ingestionClient := logpb.NewLogIngestionClient(ingestionConn)
 
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		log.Fatalf("Failed to create zstd encoder: %v", err)
+	}
+
 	agent := &Agent{
 		id:              agentID,
 		configClient:    configClient,
@@ -331,6 +371,7 @@ func main() {
 		conn:            ingestionConn,
 		logChan:         make(chan *logpb.LogEntry, 1000),
 		config:          &AgentConfig{},
+		encoder:         encoder,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -344,15 +385,15 @@ func main() {
 		var cfg AgentConfig
 		if err := yaml.Unmarshal(resp.ConfigPayload, &cfg); err == nil {
 			agent.config = &cfg
-			agent.configVersion = resp.ConfigVersion
-			log.Printf("Loaded initial config version: %s", resp.ConfigVersion)
+			agent.configVersion = resp.Version
+			log.Printf("Loaded initial config version: %s", resp.Version)
 		}
 	}
 
 	go agent.configPoller()
 	go agent.batchSender()
 
-	logFiles := []string{"/logs/app.log", "/logs/tomcat.log", "/logs/nginx.log"}
+	logFiles := []string{"/logs/application.log", "/logs/tomcat.log", "/logs/nginx.log"}
 	for _, file := range logFiles {
 		if _, err := os.Stat(file); err == nil {
 			go agent.tailFile(file)

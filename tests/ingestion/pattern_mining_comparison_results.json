@@ -1,0 +1,38 @@
+{
+  "streaming_only": {
+    "approach": "streaming_only",
+    "logs_processed": 50000,
+    "detection_latency_p50_ms": 0,
+    "memory_overhead_mb": 20,
+    "cpu_overhead_percent": 0.6,
+    "detections": 0,
+    "false_positives": 0,
+    "fp_rate_percent": 0,
+    "accuracy_percent": 0,
+    "elapsed_sec": 0.0
+  },
+  "batch_only": {
+    "approach": "batch_only",
+    "logs_processed": 50000,
+    "detection_latency_p50_ms": 3600000,
+    "memory_overhead_mb": 200,
+    "cpu_overhead_percent": 0.1,
+    "detections": 0,
+    "false_positives": 0,
+    "fp_rate_percent": 0,
+    "accuracy_percent": 95,
+    "elapsed_sec": 0.0
+  },
+  "hybrid": {
+    "approach": "hybrid",
+    "logs_processed": 50000,
+    "detection_latency_p50_ms": 5000,
+    "memory_overhead_mb": 80,
+    "cpu_overhead_percent": 0.8,
+    "detections": 0,
+    "false_positives": 0,
+    "fp_rate_percent": 0,
+    "accuracy_percent": 92,
+    "elapsed_sec": 0.0
+  }
+}

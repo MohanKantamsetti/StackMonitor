@@ -199,7 +199,7 @@ class Agent:
             batch_id=self.batch_id,
             timestamp_ms=int(time.time() * 1000),
             logs=logs,
-            compression=logs_pb2.CompressionType.NONE,  # Simplified for PoC
+            compression=logs_pb2.CompressionType.NONE,  # Compression not implemented yet
         )
 
         try:

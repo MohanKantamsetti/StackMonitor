@@ -1,0 +1,38 @@
+{
+  "postgresql": {
+    "engine": "postgresql",
+    "write_throughput_per_sec": 768940,
+    "write_latency_sec": 0.13,
+    "storage_bytes": 22358299,
+    "storage_gb_7day": 0.16,
+    "query_latency_fulltext_ms": 45200,
+    "query_latency_timerange_ms": 120000,
+    "query_latency_topn_ms": 67000,
+    "compression_ratio": 0,
+    "lightweight_score": 4
+  },
+  "elasticsearch": {
+    "engine": "elasticsearch",
+    "write_throughput_per_sec": 766652,
+    "write_latency_sec": 0.13,
+    "storage_bytes": 2343446,
+    "storage_gb_7day": 0.02,
+    "query_latency_fulltext_ms": 2400,
+    "query_latency_timerange_ms": 8300,
+    "query_latency_topn_ms": 4100,
+    "compression_ratio": 89.52,
+    "lightweight_score": 5
+  },
+  "clickhouse": {
+    "engine": "clickhouse",
+    "write_throughput_per_sec": 49286768,
+    "write_latency_sec": 0.0,
+    "storage_bytes": 2085749,
+    "storage_gb_7day": 0.01,
+    "query_latency_fulltext_ms": 780,
+    "query_latency_timerange_ms": 1200,
+    "query_latency_topn_ms": 1500,
+    "compression_ratio": 90.67,
+    "lightweight_score": 9
+  }
+}

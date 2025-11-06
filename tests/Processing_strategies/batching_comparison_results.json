@@ -1,0 +1,50 @@
+{
+  "streaming": {
+    "strategy": "streaming",
+    "rate": 5000,
+    "cpu_avg": 16.536363636363635,
+    "cpu_max": 28.4,
+    "memory_avg": 56.45454545454545,
+    "memory_max": 57.4,
+    "logs_sent": 207037,
+    "logs_received": 207037,
+    "total_bytes": 8398086,
+    "bandwidth_mbps": 1.1012824060866209,
+    "latency_p50_ms": 27.448814142209702,
+    "latency_p99_ms": 49.53264296530284,
+    "batches_sent": 207037,
+    "batches_received": 207037
+  },
+  "fixed": {
+    "strategy": "fixed",
+    "rate": 5000,
+    "cpu_avg": 5.443181818181818,
+    "cpu_max": 24.6,
+    "memory_avg": 56.393181818181816,
+    "memory_max": 57.8,
+    "logs_sent": 222640,
+    "logs_received": 90272,
+    "total_bytes": 9039434,
+    "bandwidth_mbps": 1.1854429544256773,
+    "latency_p50_ms": 29.273232538651527,
+    "latency_p99_ms": 49.56686253895284,
+    "batches_sent": 138,
+    "batches_received": 274
+  },
+  "adaptive": {
+    "strategy": "adaptive",
+    "rate": 5000,
+    "cpu_avg": 4.240909090909091,
+    "cpu_max": 9.4,
+    "memory_avg": 56.82272727272727,
+    "memory_max": 58.3,
+    "logs_sent": 223233,
+    "logs_received": 90523,
+    "total_bytes": 9063724,
+    "bandwidth_mbps": 1.1886411003948543,
+    "latency_p50_ms": 26.532491746929846,
+    "latency_p99_ms": 49.40287110963538,
+    "batches_sent": 139,
+    "batches_received": 276
+  }
+}

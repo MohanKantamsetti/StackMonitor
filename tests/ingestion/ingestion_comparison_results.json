@@ -1,0 +1,32 @@
+{
+  "all_active": {
+    "approach": "all_active",
+    "logs_processed": 100000,
+    "backend_throughput_per_sec": 13117858,
+    "error_latency_p50_ms": 4.47,
+    "info_latency_p50_ms": 3.88,
+    "network_cost_per_day": 400,
+    "queue_pressure": "High (continuous writes)",
+    "elapsed_sec": 0.01
+  },
+  "all_lazy_30s": {
+    "approach": "all_lazy_30s",
+    "logs_processed": 100000,
+    "backend_throughput_per_sec": 333,
+    "error_latency_p50_ms": 12604.5,
+    "info_latency_p50_ms": 15001.05,
+    "network_cost_per_day": 35,
+    "queue_pressure": "Low (batched writes)",
+    "elapsed_sec": 30.0
+  },
+  "adaptive_hybrid": {
+    "approach": "adaptive_hybrid",
+    "logs_processed": 100000,
+    "backend_throughput_per_sec": 100660,
+    "error_latency_p50_ms": 0.5,
+    "info_latency_p50_ms": 7499.92,
+    "network_cost_per_day": 80,
+    "queue_pressure": "Balanced (priority-based)",
+    "elapsed_sec": 15.0
+  }
+}

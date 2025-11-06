@@ -1,0 +1,38 @@
+{
+  "gzip": {
+    "algorithm": "gzip",
+    "original_size": 1071802,
+    "compressed_size": 107245,
+    "compression_ratio": 89.99,
+    "comp_time_ms": 19.18,
+    "decomp_time_ms": 0.41,
+    "cpu_overhead": 0.01
+  },
+  "zstd-3": {
+    "algorithm": "zstd-3",
+    "original_size": 1071802,
+    "compressed_size": 136015,
+    "compression_ratio": 87.31,
+    "comp_time_ms": 3.73,
+    "decomp_time_ms": 0.33,
+    "cpu_overhead": 0.0
+  },
+  "lz4": {
+    "algorithm": "lz4",
+    "original_size": 1071802,
+    "compressed_size": 215408,
+    "compression_ratio": 79.9,
+    "comp_time_ms": 0.74,
+    "decomp_time_ms": 0.16,
+    "cpu_overhead": 0.0
+  },
+  "hybrid": {
+    "algorithm": "hybrid",
+    "original_size": 1071802,
+    "compressed_size": 94488,
+    "compression_ratio": 91.18,
+    "comp_time_ms": 3.38,
+    "decomp_time_ms": 0.5,
+    "cpu_overhead": 0.0
+  }
+}

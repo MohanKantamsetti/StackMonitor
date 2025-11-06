@@ -1,8 +1,8 @@
 # PoC config based on Chapter 4.15
-version: "v1.0.1"
+version: "v1.0.2"
 
 agent_settings:
-  poll_interval: "60s"
+  poll_interval: "45s"  # Modified for hot-reload test
   batch_size_kb: 64
   batch_window: "10s"
 

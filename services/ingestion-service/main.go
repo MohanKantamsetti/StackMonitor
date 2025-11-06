@@ -35,14 +35,14 @@ type ingestionServer struct {
 	decoder    *zstd.Decoder
 }
 
-// PoC Deduplication: simple in-memory hash cache
+// Deduplication: in-memory hash cache with automatic expiration
 func (s *ingestionServer) isDuplicate(entry *pb.LogEntry) bool {
 	// Include agent_id and trace_id in hash for better duplicate detection
 	hash := fmt.Sprintf("%d-%s-%s-%s-%s", entry.TimestampNs, entry.Message, entry.Level, entry.AgentId, entry.Fields["trace_id"])
 	if _, loaded := s.dedupCache.LoadOrStore(hash, true); loaded {
 		return true
 	}
-	// Expire old cache entries (simple time-based) - extended to 60s for testing
+	// Expire cache entries after 60s to prevent memory leak
 	time.AfterFunc(60*time.Second, func() { s.dedupCache.Delete(hash) })
 	return false
 }
@@ -61,8 +61,10 @@ func (s *ingestionServer) StreamLogs(stream pb.LogIngestion_StreamLogsServer) er
 		// Use logs directly from batch
 		logsToProcess := batch.Logs
 		
-		// Handle compression if needed (for future use)
+		// Handle compression if enabled
 		if batch.Compression == pb.CompressionType_ZSTD && len(batch.CompressedPayload) > 0 {
+			log.Printf("Received compressed batch %d (%d bytes compressed, original: %d bytes)", 
+				batch.BatchId, len(batch.CompressedPayload), batch.OriginalSize)
 			// Decompress payload
 			decompressed, err := s.decoder.DecodeAll(batch.CompressedPayload, nil)
 			if err != nil {
@@ -75,8 +77,9 @@ func (s *ingestionServer) StreamLogs(stream pb.LogIngestion_StreamLogsServer) er
 				})
 				continue
 			}
-			// For PoC, we use uncompressed logs
-			_ = decompressed // Suppress unused
+			// TODO: Parse decompressed payload into logs
+			// For now, we use uncompressed logs from batch.Logs
+			_ = decompressed
 		}
 
 		processedCount := 0
