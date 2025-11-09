@@ -543,8 +543,8 @@ class StackMonitorValidator:
         r.add_detail(f"  Unique logs inserted: {logs_inserted:,}", "INFO")
         
         if dedup_rate == 0:
-            r.add_detail("  Note: 0% dedup rate is expected with unique timestamped logs", "INFO")
-            r.add_detail("  Deduplication system is active and ready to filter duplicates", "INFO")
+            r.add_detail("  Note: 0% dedup rate = all log messages are unique", "INFO")
+            r.add_detail("  Deduplication active: Same message+level+service within 60s = deduplicated", "INFO")
         else:
             r.add_detail(f"  System actively filtering {logs_duplicate:,} duplicate log entries", "INFO")
         

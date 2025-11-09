@@ -54,13 +54,25 @@ type ingestionServer struct {
 }
 
 // Deduplication: in-memory hash cache with automatic expiration
+// Detects duplicate log messages within a 60-second window
 func (s *ingestionServer) isDuplicate(entry *pb.LogEntry) bool {
-	// Include agent_id and trace_id in hash for better duplicate detection
-	hash := fmt.Sprintf("%d-%s-%s-%s-%s", entry.TimestampNs, entry.Message, entry.Level, entry.AgentId, entry.Fields["trace_id"])
-	if _, loaded := s.dedupCache.LoadOrStore(hash, true); loaded {
-		return true
+	// Hash based on message content, level, and service (NOT timestamp)
+	// This catches the same error/warning occurring multiple times within 60s
+	service := entry.Fields["service"]
+	if service == "" {
+		service = "unknown"
 	}
+	
+	// Create hash from: message + level + service
+	// Do NOT include timestamp - we want to catch duplicate messages even if timestamps differ
+	hash := fmt.Sprintf("%s-%s-%s", entry.Message, entry.Level, service)
+	
+	if _, loaded := s.dedupCache.LoadOrStore(hash, true); loaded {
+		return true // Duplicate found
+	}
+	
 	// Expire cache entries after 60s to prevent memory leak
+	// After 60s, the same error can be logged again (not considered a duplicate anymore)
 	time.AfterFunc(60*time.Second, func() { s.dedupCache.Delete(hash) })
 	return false
 }
