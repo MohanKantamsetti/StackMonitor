@@ -6,9 +6,14 @@ import re
 import os
 import queue
 import threading
+import signal
+import zstandard as zstd
 from datetime import datetime
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse
+import json
 
 # Import generated gRPC stubs (will be generated during build)
 import sys
@@ -20,11 +25,11 @@ import config_pb2_grpc
 
 CONFIG_SERVICE = os.getenv("CONFIG_URL", "config-service:8080")
 INGESTION_SERVICE = os.getenv("INGESTION_URL", "ingestion-service:50051")
-LOG_FILES = ["/logs/app.log", "/logs/tomcat.log", "/logs/nginx.log"]
+LOG_FILES = ["/logs/application.log", "/logs/tomcat.log", "/logs/nginx.log"]
 AGENT_ID = os.getenv("AGENT_ID", f"python-agent-{int(time.time())}")
 
 # Regex patterns for different log formats
-APP_LOG_REGEX = re.compile(r'^(\S+)\s+(\S+)\s+\[(\S+)\]\s+(.*)')  # Application log
+APP_LOG_REGEX = re.compile(r'^\[([^\]]+)\]\s+\[(\S+)\]\s+\[([^\]]+)\]\s+(.*)')  # Application log: [TIMESTAMP] [LEVEL] [SERVICE] MESSAGE
 TOMCAT_LOG_REGEX = re.compile(r'^(\d{2}-[A-Za-z]{3}-\d{4}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+(\S+)\s+\[([^\]]+)\]\s+(.*)')  # Tomcat log
 NGINX_LOG_REGEX = re.compile(r'^(\S+)\s+-\s+-\s+\[([^\]]+)\]\s+"(\S+)\s+(\S+)\s+(\S+)"\s+(\d+)\s+(\d+)\s+"([^"]+)"\s+"([^"]+)"')  # Nginx Combined
 
@@ -41,16 +46,99 @@ class AgentConfig:
         self.base_rates = sampling.get("base_rates", self.base_rates)
         self.content_rules = sampling.get("content_rules", [])
 
+class MetricsHandler(BaseHTTPRequestHandler):
+    agent = None  # Will be set by main
+    
+    def do_GET(self):
+        parsed_path = urlparse(self.path)
+        
+        if parsed_path.path == '/health':
+            self.send_health()
+        elif parsed_path.path == '/metrics':
+            self.send_metrics()
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def send_health(self):
+        with self.agent.metrics_lock:
+            uptime = time.time() - self.agent.start_time
+            last_batch_ago = time.time() - self.agent.last_batch_time if self.agent.last_batch_time > 0 else uptime
+            healthy = self.agent.healthy and last_batch_ago < 120  # 2 minutes
+            
+            response = {
+                "status": "healthy" if healthy else "unhealthy",
+                "agent_id": self.agent.agent_id,
+                "uptime_seconds": uptime,
+                "last_batch_ago": last_batch_ago,
+                "config_version": self.agent.config_version,
+                "log_queue_size": self.agent.log_queue.qsize()
+            }
+        
+        status_code = 200 if healthy else 503
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(response).encode())
+    
+    def send_metrics(self):
+        with self.agent.metrics_lock:
+            uptime = time.time() - self.agent.start_time
+            compression_ratio = (self.agent.bytes_original / self.agent.bytes_compressed 
+                               if self.agent.bytes_compressed > 0 else 1.0)
+            
+            response = {
+                "agent_id": self.agent.agent_id,
+                "uptime_seconds": uptime,
+                "logs_processed": self.agent.logs_processed,
+                "logs_sampled": self.agent.logs_sampled,
+                "batches_sent": self.agent.batches_sent,
+                "batches_failed": self.agent.batches_failed,
+                "bytes_original": self.agent.bytes_original,
+                "bytes_compressed": self.agent.bytes_compressed,
+                "compression_ratio": compression_ratio,
+                "logs_per_second": self.agent.logs_processed / uptime if uptime > 0 else 0,
+                "log_queue_size": self.agent.log_queue.qsize()
+            }
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(response).encode())
+    
+    def log_message(self, format, *args):
+        # Suppress default logging
+        pass
+
 class LogHandler(FileSystemEventHandler):
     def __init__(self, agent, file_path):
         self.agent = agent
         self.file_path = file_path
         self.last_position = 0
         self._ensure_file()
+        self._read_existing_logs()  # Read existing logs on startup
 
     def _ensure_file(self):
         if os.path.exists(self.file_path):
-            self.last_position = os.path.getsize(self.file_path)
+            self.last_position = 0  # Start from beginning to read existing logs
+
+    def _read_existing_logs(self):
+        """Read all existing logs from the file on startup (like Go agent)"""
+        if not os.path.exists(self.file_path):
+            return
+        
+        try:
+            line_count = 0
+            with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    entry = self.agent.parse_log(line.strip(), self.file_path)
+                    if entry:
+                        self.agent.log_queue.put(entry)
+                        line_count += 1
+                self.last_position = f.tell()
+            print(f"Processed {line_count} existing logs from {self.file_path}")
+        except Exception as e:
+            print(f"Error reading existing logs from {self.file_path}: {e}")
 
     def on_modified(self, event):
         if event.is_directory:
@@ -80,6 +168,21 @@ class Agent:
         self.log_queue = queue.Queue()
         self.config_lock = threading.Lock()
         self.batch_id = 0
+        
+        # Metrics
+        self.logs_processed = 0
+        self.logs_sampled = 0
+        self.batches_sent = 0
+        self.batches_failed = 0
+        self.bytes_original = 0
+        self.bytes_compressed = 0
+        self.start_time = time.time()
+        self.last_batch_time = 0
+        self.metrics_lock = threading.Lock()
+        self.healthy = False
+        
+        # ZSTD compressor
+        self.compressor = zstd.ZstdCompressor(level=3)
 
     def parse_log(self, line, source):
         if not line:
@@ -96,9 +199,9 @@ class Agent:
             timestamp_str, level, service, message = match.groups()
             try:
                 if '.' in timestamp_str:
-                    t = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+                    t = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f")
                 else:
-                    t = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%SZ")
+                    t = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
             except:
                 pass
         else:
@@ -151,7 +254,12 @@ class Agent:
                     break
 
         if rate < 1.0 and random.random() > rate:
+            with self.metrics_lock:
+                self.logs_sampled += 1
             return None  # Sampled out
+
+        with self.metrics_lock:
+            self.logs_processed += 1
 
         entry = logs_pb2.LogEntry(
             timestamp_ns=timestamp_ns,
@@ -194,12 +302,28 @@ class Agent:
             return
 
         self.batch_id += 1
+        
+        # Serialize logs to bytes (same as Go agent)
+        log_bytes = b''
+        for log in logs:
+            log_data = log.SerializeToString()
+            log_bytes += log_data
+        
+        original_size = len(log_bytes)
+        
+        # Compress with ZSTD
+        compressed = self.compressor.compress(log_bytes)
+        compressed_size = len(compressed)
+        
+        # Create batch with compression (matching Go agent format)
         batch = logs_pb2.LogBatch(
             agent_id=self.agent_id,
             batch_id=self.batch_id,
             timestamp_ms=int(time.time() * 1000),
-            logs=logs,
-            compression=logs_pb2.CompressionType.NONE,  # Compression not implemented yet
+            logs=logs,  # Keep for backward compatibility
+            compression=logs_pb2.CompressionType.ZSTD,
+            compressed_payload=compressed,
+            original_size=original_size,
         )
 
         try:
@@ -207,11 +331,22 @@ class Agent:
             # Get ack
             try:
                 ack = next(stream)
+                ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+                print(f"Sent batch {self.batch_id} with {len(logs)} logs (compressed {original_size}->{compressed_size} bytes, {ratio:.2f}x)")
                 print(f"Received ack for batch {ack.batch_id}: {ack.message}")
+                
+                with self.metrics_lock:
+                    self.batches_sent += 1
+                    self.bytes_original += original_size
+                    self.bytes_compressed += compressed_size
+                    self.last_batch_time = time.time()
+                    self.healthy = True
             except StopIteration:
                 pass
         except Exception as e:
             print(f"Failed to send batch: {e}")
+            with self.metrics_lock:
+                self.batches_failed += 1
 
     def config_poller(self, stub):
         while True:
@@ -270,6 +405,14 @@ def main():
     batch_thread = threading.Thread(target=agent.batch_sender, args=(ingestion_stub,), daemon=True)
     batch_thread.start()
 
+    # Start HTTP server for health and metrics
+    MetricsHandler.agent = agent  # Set agent reference for HTTP handler
+    http_port = int(os.getenv("HTTP_PORT", "8083"))
+    http_server = HTTPServer(('0.0.0.0', http_port), MetricsHandler)
+    http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+    http_thread.start()
+    print(f"Starting HTTP server on port {http_port}")
+
     # Set up file watchers
     observer = Observer()
     for log_file in LOG_FILES:
@@ -283,12 +426,35 @@ def main():
     observer.start()
 
     print("Python agent started. Waiting for logs...")
+    
+    # Setup graceful shutdown
+    shutdown_event = threading.Event()
+    
+    def signal_handler(signum, frame):
+        print("Shutdown signal received, gracefully stopping...")
+        shutdown_event.set()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
-        while True:
-            time.sleep(1)
+        shutdown_event.wait()
     except KeyboardInterrupt:
-        observer.stop()
+        pass
+    
+    # Cleanup
+    print("Stopping observer...")
+    observer.stop()
     observer.join()
+    
+    print("Shutting down HTTP server...")
+    http_server.shutdown()
+    
+    print("Closing gRPC channels...")
+    config_channel.close()
+    ingestion_channel.close()
+    
+    print("Python agent stopped gracefully")
 
 if __name__ == "__main__":
     main()

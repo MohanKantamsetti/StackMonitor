@@ -607,12 +607,18 @@ func (mcp *MCPServer) processWithKeywords(query string) string {
 		if err != nil {
 			response = fmt.Sprintf("❌ Error querying logs: %v", err)
 		} else {
-			// Parse and format the response
+			// Parse the response to get count
+			var data struct {
+				Count int `json:"count"`
+			}
+			json.Unmarshal([]byte(toolResult), &data)
+			
+			// Format with API link
 			formatted := mcp.formatLogResponse(toolResult, "errors")
 			if formatted == "" {
 				response = "✅ No errors found in recent logs. Your system looks healthy!"
 			} else {
-				response = fmt.Sprintf("🔴 **Found Errors:**\n\n%s", formatted)
+				response = fmt.Sprintf("🔴 **Recent Errors Found**\n\n%s", formatted)
 			}
 		}
 
@@ -685,7 +691,7 @@ func (mcp *MCPServer) processWithKeywords(query string) string {
 	return response
 }
 
-// Format log response to be more readable
+// Format log response to be more readable with API links
 func (mcp *MCPServer) formatLogResponse(jsonResponse, logType string) string {
 	var data struct {
 		Logs []struct {
@@ -708,15 +714,59 @@ func (mcp *MCPServer) formatLogResponse(jsonResponse, logType string) string {
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Found %d %s:\n\n", data.Count, logType))
-
-	for i, log := range data.Logs {
-		if i >= 10 { // Limit to 10 logs for readability
-			result.WriteString(fmt.Sprintf("\n... and %d more (showing first 10)", data.Count-10))
-			break
-		}
-		result.WriteString(fmt.Sprintf("• [%s] %s: %s\n", log.Level, log.Service, log.Message))
+	
+	// Calculate service breakdown
+	serviceCount := make(map[string]int)
+	for _, log := range data.Logs {
+		serviceCount[log.Service]++
 	}
+	
+	// Summary first
+	result.WriteString(fmt.Sprintf("## 📊 Summary\n\n"))
+	result.WriteString(fmt.Sprintf("**Total %s:** %d\n\n", logType, data.Count))
+	
+	if len(serviceCount) > 0 {
+		result.WriteString("**By Service:**\n")
+		for service, count := range serviceCount {
+			result.WriteString(fmt.Sprintf("- %s: %d\n", service, count))
+		}
+		result.WriteString("\n")
+	}
+
+	// Show only first 3 logs inline for preview
+	displayCount := 3
+	if len(data.Logs) < displayCount {
+		displayCount = len(data.Logs)
+	}
+
+	result.WriteString("## 🔍 Recent Examples\n\n")
+	for i := 0; i < displayCount; i++ {
+		log := data.Logs[i]
+		// Truncate message if too long
+		message := log.Message
+		if len(message) > 120 {
+			message = message[:120] + "..."
+		}
+		result.WriteString(fmt.Sprintf("%d. `[%s]` **%s**: %s\n", i+1, log.Level, log.Service, message))
+	}
+
+	// Add API link to view all
+	if data.Count > displayCount {
+		result.WriteString(fmt.Sprintf("\n_... and **%d more %s**_\n\n", data.Count-displayCount, logType))
+	}
+	
+	// Generate API query link based on log type
+	apiURL := fmt.Sprintf("http://localhost:5000/api/v1/logs?limit=%d", data.Count)
+	if logType == "errors" {
+		apiURL = fmt.Sprintf("http://localhost:5000/api/v1/logs?level=ERROR&limit=%d", data.Count)
+	} else if logType == "warnings" {
+		apiURL = fmt.Sprintf("http://localhost:5000/api/v1/logs?level=WARN&limit=%d", data.Count)
+	}
+	
+	result.WriteString("\n---\n\n")
+	result.WriteString(fmt.Sprintf("### 🔗 View Full Details\n\n"))
+	result.WriteString(fmt.Sprintf("**[📊 Open all %d %s in API (New Tab) →](%s)**\n\n", data.Count, logType, apiURL))
+	result.WriteString(fmt.Sprintf("This link opens the complete API response with all logs, timestamps, and trace IDs.\n"))
 
 	return result.String()
 }

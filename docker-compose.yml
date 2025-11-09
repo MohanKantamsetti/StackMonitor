@@ -7,6 +7,12 @@ services:
       dockerfile: Dockerfile
     volumes:
       - logs-data:/logs
+    environment:
+      # Configure log level distribution (must sum to 1.0)
+      # Default: INFO=80%, WARN=15%, ERROR=5%
+      - LOG_RATE_INFO=0.80
+      - LOG_RATE_WARN=0.15
+      - LOG_RATE_ERROR=0.05
     restart: unless-stopped
 
   go-agent:
@@ -18,25 +24,31 @@ services:
       - ingestion-service
     volumes:
       - logs-data:/logs:ro
+    ports:
+      - "8081:8081"  # Health & metrics HTTP endpoint
     environment:
       - AGENT_ID=go-agent-1
       - CONFIG_URL=config-service:8080
       - INGESTION_URL=ingestion-service:50051
+      - HTTP_PORT=8081
     restart: unless-stopped
 
   python-agent:
     build:
-      context: ./agents/python-agent
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./agents/python-agent/Dockerfile
     depends_on:
       - config-service
       - ingestion-service
     volumes:
       - logs-data:/logs:ro
+    ports:
+      - "8083:8083"  # Health & metrics HTTP endpoint
     environment:
       - AGENT_ID=python-agent-1
       - CONFIG_URL=config-service:8080
       - INGESTION_URL=ingestion-service:50051
+      - HTTP_PORT=8083
     restart: unless-stopped
 
   clickhouse:
@@ -77,11 +89,13 @@ services:
       context: ./services/ingestion-service
       dockerfile: Dockerfile
     ports:
-      - "50051:50051"
+      - "50051:50051"  # gRPC endpoint
+      - "8082:8082"    # Health & metrics HTTP endpoint
     depends_on:
       - clickhouse-init
     environment:
       - CLICKHOUSE_ADDR=clickhouse:9000
+      - HTTP_PORT=8082
     restart: unless-stopped
 
   config-service:

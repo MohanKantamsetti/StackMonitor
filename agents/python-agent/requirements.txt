@@ -3,3 +3,4 @@ grpcio-tools>=1.60.0
 watchdog>=3.0.0
 pyyaml>=6.0
 protobuf>=4.25.0
+zstandard>=0.22.0

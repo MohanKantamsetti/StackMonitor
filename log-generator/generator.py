@@ -6,7 +6,7 @@ from datetime import datetime
 
 LOG_DIR = "/logs"
 LOG_FILES = {
-    "application": os.path.join(LOG_DIR, "app.log"),
+    "application": os.path.join(LOG_DIR, "application.log"),
     "tomcat": os.path.join(LOG_DIR, "tomcat.log"),
     "nginx": os.path.join(LOG_DIR, "nginx.log"),
 }
@@ -30,11 +30,23 @@ HTTP_STATUS_CODES = {
 }
 HTTP_PATHS = ["/api/users", "/api/payments", "/api/orders", "/health", "/metrics", "/login", "/logout"]
 
+# Log level distribution (configurable via environment variables)
+# Default: INFO=80%, WARN=15%, ERROR=5%
 LEVELS = {
-    "INFO": 0.80,
-    "WARN": 0.15,
-    "ERROR": 0.05
+    "INFO": float(os.getenv("LOG_RATE_INFO", "0.80")),
+    "WARN": float(os.getenv("LOG_RATE_WARN", "0.15")),
+    "ERROR": float(os.getenv("LOG_RATE_ERROR", "0.05"))
 }
+
+# Validate that rates sum to 1.0
+total_rate = sum(LEVELS.values())
+if abs(total_rate - 1.0) > 0.01:
+    print(f"Warning: Log level rates sum to {total_rate}, adjusting to 1.0")
+    # Normalize to sum to 1.0
+    for level in LEVELS:
+        LEVELS[level] = LEVELS[level] / total_rate
+
+print(f"Log level distribution: INFO={LEVELS['INFO']*100:.1f}%, WARN={LEVELS['WARN']*100:.1f}%, ERROR={LEVELS['ERROR']*100:.1f}%")
 
 APP_MESSAGES = {
     "INFO": [

@@ -12,11 +12,18 @@ function ChatSidebar({ onQuery, response }) {
 
   // Scroll to bottom when new messages are added
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      const messagesContainer = messagesEndRef.current.parentElement;
+      if (messagesContainer) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+    }
   };
 
   useEffect(() => {
-    scrollToBottom();
+    // Use setTimeout to ensure DOM has updated
+    const timeoutId = setTimeout(scrollToBottom, 0);
+    return () => clearTimeout(timeoutId);
   }, [chatHistory]);
 
   // Handle incoming response
@@ -50,8 +57,18 @@ function ChatSidebar({ onQuery, response }) {
     // Clear input immediately
     setQuery('');
     
-    // Call the query handler (async)
-    await onQuery(userQuery);
+    // Call the query handler (async) with error handling
+    try {
+      await onQuery(userQuery);
+    } catch (error) {
+      console.error('Error in handleSubmit:', error);
+      // Add error message to chat
+      setChatHistory(prev => [...prev, { 
+        type: 'assistant', 
+        text: `❌ Failed to process query: ${error.message}` 
+      }]);
+      setPendingQuery(null);
+    }
   };
 
   return (
@@ -70,7 +87,24 @@ function ChatSidebar({ onQuery, response }) {
             {chatHistory.map((msg, idx) => (
               <div key={`${msg.type}-${idx}-${msg.text.substring(0, 20)}`} className={`chat-message ${msg.type}`}>
                 <div className="message-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({node, ...props}) => (
+                        <a 
+                          {...props} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          style={{
+                            color: '#2196f3',
+                            textDecoration: 'underline',
+                            fontWeight: '500',
+                            cursor: 'pointer'
+                          }}
+                        />
+                      )
+                    }}
+                  >
                     {msg.text}
                   </ReactMarkdown>
                 </div>

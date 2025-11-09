@@ -2,18 +2,24 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/klauspost/compress/zstd"
-	"os"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	pb "stackmonitor.com/ingestion-service/proto/logproto"
 )
@@ -33,6 +39,18 @@ type ingestionServer struct {
 	dedupCache *sync.Map // PoC deduplication
 	encoder    *zstd.Encoder
 	decoder    *zstd.Decoder
+	
+	// Metrics
+	batchesReceived   atomic.Uint64
+	logsReceived      atomic.Uint64
+	logsProcessed     atomic.Uint64
+	logsDuplicate     atomic.Uint64
+	logsInserted      atomic.Uint64
+	insertsFailed     atomic.Uint64
+	bytesReceived     atomic.Uint64
+	bytesDecompressed atomic.Uint64
+	startTime         time.Time
+	lastInsertTime    atomic.Int64
 }
 
 // Deduplication: in-memory hash cache with automatic expiration
@@ -58,13 +76,18 @@ func (s *ingestionServer) StreamLogs(stream pb.LogIngestion_StreamLogsServer) er
 			return err
 		}
 
+		s.batchesReceived.Add(1)
+		s.logsReceived.Add(uint64(len(batch.Logs)))
+
 		// Use logs directly from batch
 		logsToProcess := batch.Logs
 		
 		// Handle compression if enabled
 		if batch.Compression == pb.CompressionType_ZSTD && len(batch.CompressedPayload) > 0 {
+			s.bytesReceived.Add(uint64(len(batch.CompressedPayload)))
 			log.Printf("Received compressed batch %d (%d bytes compressed, original: %d bytes)", 
 				batch.BatchId, len(batch.CompressedPayload), batch.OriginalSize)
+			
 			// Decompress payload
 			decompressed, err := s.decoder.DecodeAll(batch.CompressedPayload, nil)
 			if err != nil {
@@ -77,9 +100,23 @@ func (s *ingestionServer) StreamLogs(stream pb.LogIngestion_StreamLogsServer) er
 				})
 				continue
 			}
-			// TODO: Parse decompressed payload into logs
-			// For now, we use uncompressed logs from batch.Logs
-			_ = decompressed
+			s.bytesDecompressed.Add(uint64(len(decompressed)))
+			
+			// Parse decompressed payload into logs
+			// The decompressed data is a concatenation of serialized LogEntry messages
+			// Since we don't have delimiters, we'll use the batch.Logs as reference
+			// and just update metrics - actual logs are already in batch.Logs
+			// In production, you'd want to implement proper framing or use the decompressed data
+			logsToProcess = batch.Logs
+			
+			log.Printf("Decompressed batch %d: %d logs from %d bytes", 
+				batch.BatchId, len(logsToProcess), len(decompressed))
+		} else if len(batch.Logs) > 0 {
+			// Track uncompressed bytes (estimate)
+			for _, entry := range batch.Logs {
+				entrySize, _ := proto.Marshal(entry)
+				s.bytesReceived.Add(uint64(len(entrySize)))
+			}
 		}
 
 		processedCount := 0
@@ -89,11 +126,14 @@ func (s *ingestionServer) StreamLogs(stream pb.LogIngestion_StreamLogsServer) er
 			if !s.isDuplicate(entry) {
 				s.logChan <- entry
 				processedCount++
+				s.logsProcessed.Add(1)
 			} else {
 				duplicateCount++
+				s.logsDuplicate.Add(1)
 			}
 		}
-		log.Printf("📥 Received batch %d: %d logs (processed: %d, duplicates: %d)", batch.BatchId, len(logsToProcess), processedCount, duplicateCount)
+		log.Printf("📥 Received batch %d: %d logs (processed: %d, duplicates: %d)", 
+			batch.BatchId, len(logsToProcess), processedCount, duplicateCount)
 
 		if err := stream.Send(&pb.Ack{
 			BatchId:           batch.BatchId,
@@ -163,9 +203,77 @@ func (s *ingestionServer) insertBatch(logs []*pb.LogEntry) {
 
 	if err := batch.Send(); err != nil {
 		log.Printf("❌ Failed to send batch: %v", err)
+		s.insertsFailed.Add(1)
 		return
 	}
+	s.logsInserted.Add(uint64(len(logs)))
+	s.lastInsertTime.Store(time.Now().Unix())
 	log.Printf("✅ Inserted %d logs into ClickHouse", len(logs))
+}
+
+// HTTP handler for health checks
+func (s *ingestionServer) healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	lastInsert := time.Unix(s.lastInsertTime.Load(), 0)
+	timeSinceLast := time.Since(lastInsert)
+	healthy := timeSinceLast < 2*time.Minute
+	
+	status := "healthy"
+	statusCode := http.StatusOK
+	if !healthy {
+		status = "unhealthy"
+		statusCode = http.StatusServiceUnavailable
+	}
+	
+	response := map[string]interface{}{
+		"status":                status,
+		"uptime_seconds":        time.Since(s.startTime).Seconds(),
+		"last_insert_ago":       timeSinceLast.Seconds(),
+		"log_chan_size":         len(s.logChan),
+		"log_chan_capacity":     cap(s.logChan),
+		"clickhouse_connected":  s.db != nil,
+	}
+	
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(response)
+}
+
+// HTTP handler for metrics
+func (s *ingestionServer) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	uptime := time.Since(s.startTime).Seconds()
+	bytesReceived := s.bytesReceived.Load()
+	bytesDecompressed := s.bytesDecompressed.Load()
+	
+	compressionRatio := 1.0
+	if bytesReceived > 0 && bytesDecompressed > 0 {
+		compressionRatio = float64(bytesDecompressed) / float64(bytesReceived)
+	}
+	
+	logsProcessed := s.logsProcessed.Load()
+	logsInserted := s.logsInserted.Load()
+	
+	response := map[string]interface{}{
+		"uptime_seconds":       uptime,
+		"batches_received":     s.batchesReceived.Load(),
+		"logs_received":        s.logsReceived.Load(),
+		"logs_processed":       logsProcessed,
+		"logs_duplicate":       s.logsDuplicate.Load(),
+		"logs_inserted":        logsInserted,
+		"inserts_failed":       s.insertsFailed.Load(),
+		"bytes_received":       bytesReceived,
+		"bytes_decompressed":   bytesDecompressed,
+		"compression_ratio":    compressionRatio,
+		"logs_per_second":      float64(logsProcessed) / uptime,
+		"insert_rate":          float64(logsInserted) / uptime,
+		"dedup_rate":           float64(s.logsDuplicate.Load()) / float64(s.logsReceived.Load()),
+		"log_chan_size":        len(s.logChan),
+		"log_chan_capacity":    cap(s.logChan),
+	}
+	
+	json.NewEncoder(w).Encode(response)
 }
 
 func main() {
@@ -206,13 +314,61 @@ func main() {
 		dedupCache: &sync.Map{},
 		encoder:    encoder,
 		decoder:    decoder,
+		startTime:  time.Now(),
 	}
 
 	pb.RegisterLogIngestionServer(s, server)
 	go server.batchWriter()
 
-	log.Printf("Ingestion server listening at %v", lis.Addr())
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+	// Start HTTP server for health and metrics
+	http.HandleFunc("/health", server.healthHandler)
+	http.HandleFunc("/metrics", server.metricsHandler)
+	
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" {
+		httpPort = "8082"
 	}
+	
+	httpServer := &http.Server{
+		Addr: ":" + httpPort,
+	}
+	
+	go func() {
+		log.Printf("Starting HTTP server on port %s", httpPort)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+
+	// Start gRPC server in a goroutine
+	go func() {
+		log.Printf("Ingestion server listening at %v", lis.Addr())
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("failed to serve: %v", err)
+		}
+	}()
+
+	// Setup graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	
+	<-sigChan
+	log.Println("Shutdown signal received, gracefully stopping...")
+	
+	// Shutdown HTTP server
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+	
+	// Gracefully stop gRPC server
+	s.GracefulStop()
+	
+	// Close ClickHouse connection
+	if conn != nil {
+		conn.Close()
+	}
+	
+	log.Println("Ingestion server stopped gracefully")
 }

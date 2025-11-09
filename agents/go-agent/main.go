@@ -4,14 +4,19 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math/big"
+	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -53,6 +58,17 @@ type Agent struct {
 	conn            *grpc.ClientConn
 	batchID         int64
 	encoder         *zstd.Encoder
+	
+	// Metrics
+	logsProcessed   atomic.Uint64
+	logsSampled     atomic.Uint64
+	batchesSent     atomic.Uint64
+	batchesFailed   atomic.Uint64
+	bytesCompressed atomic.Uint64
+	bytesOriginal   atomic.Uint64
+	startTime       time.Time
+	healthy         atomic.Bool
+	lastBatchTime   atomic.Int64
 }
 
 var appLogRegex = regexp.MustCompile(`^\[([^\]]+)\]\s+\[(\S+)\]\s+\[([^\]]+)\]\s+(.*)`)
@@ -134,10 +150,13 @@ func (a *Agent) parseLog(line, source string) *logpb.LogEntry {
 	if rate < 1.0 {
 		n, _ := rand.Int(rand.Reader, big.NewInt(100))
 		if n.Int64() > int64(rate*100) {
+			a.logsSampled.Add(1)
 			return nil
 		}
 	}
 
+	a.logsProcessed.Add(1)
+	
 	return &logpb.LogEntry{
 		TimestampNs: t.UnixNano(),
 		Level:       level,
@@ -289,11 +308,77 @@ func (a *Agent) sendBatch(logs []*logpb.LogEntry) {
 
 	if err := a.stream.Send(batch); err != nil {
 		log.Printf("Failed to send batch: %v", err)
+		a.batchesFailed.Add(1)
 	} else {
 		ratio := float64(originalSize) / float64(len(compressed))
 		log.Printf("Sent batch %d with %d logs (compressed %d->%d bytes, %.2fx)", 
 			a.batchID, len(logs), originalSize, len(compressed), ratio)
+		a.batchesSent.Add(1)
+		a.bytesOriginal.Add(uint64(originalSize))
+		a.bytesCompressed.Add(uint64(len(compressed)))
+		a.lastBatchTime.Store(time.Now().Unix())
+		a.healthy.Store(true)
 	}
+}
+
+// HTTP handler for health checks
+func (a *Agent) healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	lastBatch := time.Unix(a.lastBatchTime.Load(), 0)
+	timeSinceLast := time.Since(lastBatch)
+	healthy := a.healthy.Load() && timeSinceLast < 2*time.Minute
+	
+	status := "healthy"
+	statusCode := http.StatusOK
+	if !healthy {
+		status = "unhealthy"
+		statusCode = http.StatusServiceUnavailable
+	}
+	
+	response := map[string]interface{}{
+		"status":           status,
+		"agent_id":         a.id,
+		"uptime_seconds":   time.Since(a.startTime).Seconds(),
+		"last_batch_ago":   timeSinceLast.Seconds(),
+		"config_version":   a.configVersion,
+		"log_chan_size":    len(a.logChan),
+	}
+	
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(response)
+}
+
+// HTTP handler for metrics
+func (a *Agent) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	uptime := time.Since(a.startTime).Seconds()
+	logsProcessed := a.logsProcessed.Load()
+	bytesOriginal := a.bytesOriginal.Load()
+	bytesCompressed := a.bytesCompressed.Load()
+	
+	compressionRatio := 1.0
+	if bytesCompressed > 0 {
+		compressionRatio = float64(bytesOriginal) / float64(bytesCompressed)
+	}
+	
+	response := map[string]interface{}{
+		"agent_id":           a.id,
+		"uptime_seconds":     uptime,
+		"logs_processed":     logsProcessed,
+		"logs_sampled":       a.logsSampled.Load(),
+		"batches_sent":       a.batchesSent.Load(),
+		"batches_failed":     a.batchesFailed.Load(),
+		"bytes_original":     bytesOriginal,
+		"bytes_compressed":   bytesCompressed,
+		"compression_ratio":  compressionRatio,
+		"logs_per_second":    float64(logsProcessed) / uptime,
+		"log_chan_size":      len(a.logChan),
+		"log_chan_capacity":  cap(a.logChan),
+	}
+	
+	json.NewEncoder(w).Encode(response)
 }
 
 func (a *Agent) configPoller() {
@@ -372,7 +457,9 @@ func main() {
 		logChan:         make(chan *logpb.LogEntry, 1000),
 		config:          &AgentConfig{},
 		encoder:         encoder,
+		startTime:       time.Now(),
 	}
+	agent.healthy.Store(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	resp, err := configClient.GetConfig(ctx, &configpb.ConfigRequest{
@@ -393,6 +480,27 @@ func main() {
 	go agent.configPoller()
 	go agent.batchSender()
 
+	// Start HTTP server for health and metrics
+	http.HandleFunc("/health", agent.healthHandler)
+	http.HandleFunc("/metrics", agent.metricsHandler)
+	
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" {
+		httpPort = "8081"
+	}
+	
+	httpServer := &http.Server{
+		Addr: ":" + httpPort,
+	}
+	
+	go func() {
+		log.Printf("Starting HTTP server on port %s", httpPort)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+
+	// Start tailing log files
 	logFiles := []string{"/logs/application.log", "/logs/tomcat.log", "/logs/nginx.log"}
 	for _, file := range logFiles {
 		if _, err := os.Stat(file); err == nil {
@@ -404,5 +512,28 @@ func main() {
 	}
 
 	log.Println("Go agent started. Waiting for logs...")
-	select {}
+	
+	// Setup graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	
+	<-sigChan
+	log.Println("Shutdown signal received, gracefully stopping...")
+	
+	// Shutdown HTTP server
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+	
+	// Close gRPC connections
+	if agent.conn != nil {
+		agent.conn.Close()
+	}
+	if configConn != nil {
+		configConn.Close()
+	}
+	
+	log.Println("Go agent stopped gracefully")
 }

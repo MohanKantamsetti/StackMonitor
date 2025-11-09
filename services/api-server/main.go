@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -100,7 +101,16 @@ func setupRouter(api *APIServer) *gin.Engine {
 				logs = []map[string]interface{}{}
 			}
 
-			c.JSON(http.StatusOK, gin.H{"logs": logs, "count": len(logs)})
+			result := gin.H{"logs": logs, "count": len(logs)}
+
+			// Check if request wants HTML (from browser)
+			if c.GetHeader("Accept") == "text/html" || c.Query("format") == "html" {
+				c.Header("Content-Type", "text/html; charset=utf-8")
+				renderLogsHTML(c, logs, level, service, limit)
+				return
+			}
+
+			c.JSON(http.StatusOK, result)
 		})
 
 		// GET /api/v1/logs/stats
@@ -149,13 +159,26 @@ func setupRouter(api *APIServer) *gin.Engine {
 			}
 
 			var interval string
+			var timeRange string
 			switch rangeStr {
+			case "15m":
+				interval = "1 minute"
+				timeRange = "15 MINUTE"
 			case "1h":
 				interval = "1 minute"
+				timeRange = "1 HOUR"
+			case "6h":
+				interval = "5 minute"
+				timeRange = "6 HOUR"
 			case "24h":
+				interval = "15 minute"
+				timeRange = "24 HOUR"
+			case "all":
 				interval = "1 hour"
+				timeRange = "30 DAY"
 			default:
 				interval = "1 minute"
+				timeRange = "1 HOUR"
 			}
 
 			query := `
@@ -172,7 +195,7 @@ func setupRouter(api *APIServer) *gin.Engine {
 				args = append(args, service)
 			}
 
-			query += " AND timestamp >= now() - INTERVAL 1 HOUR GROUP BY time ORDER BY time"
+			query += " AND timestamp >= now() - INTERVAL " + timeRange + " GROUP BY time ORDER BY time"
 
 			rows, err := api.db.Query(context.Background(), query, args...)
 			if err != nil {
@@ -312,6 +335,159 @@ func contains(s string, subs ...string) bool {
 		}
 	}
 	return false
+}
+
+// Render logs as HTML for browser viewing
+func renderLogsHTML(c *gin.Context, logs []map[string]interface{}, level, service string, limit int) {
+	html := `<!DOCTYPE html>
+<html>
+<head>
+    <title>StackMonitor API - Logs</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h1 { color: #333; margin-bottom: 10px; }
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        .filter-badge {
+            padding: 6px 12px;
+            background: #e3f2fd;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #1976d2;
+        }
+        .log-table {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        table { width: 100%; border-collapse: collapse; }
+        thead {
+            background: #f8f9fa;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+        }
+        tr:hover { background: #f8f9fa; }
+        .level {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 12px;
+            display: inline-block;
+        }
+        .level-ERROR { background: #ffebee; color: #c62828; }
+        .level-WARN { background: #fff8e1; color: #f57c00; }
+        .level-INFO { background: #e3f2fd; color: #1976d2; }
+        .timestamp { color: #666; font-family: 'Courier New', monospace; font-size: 12px; }
+        .service { color: #666; font-weight: 500; }
+        .message { color: #333; font-family: 'Courier New', monospace; font-size: 13px; word-break: break-word; }
+        .stats {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .api-link {
+            color: #1976d2;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .api-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 StackMonitor Logs</h1>
+            <div class="filters">`
+
+	// Add filter badges
+	if level != "" {
+		html += fmt.Sprintf(`<span class="filter-badge">Level: %s</span>`, level)
+	}
+	if service != "" {
+		html += fmt.Sprintf(`<span class="filter-badge">Service: %s</span>`, service)
+	}
+	html += fmt.Sprintf(`<span class="filter-badge">Limit: %d</span>`, limit)
+
+	html += `</div>
+        </div>
+        <div class="stats">
+            <div><strong>Total Logs:</strong> ` + fmt.Sprintf("%d", len(logs)) + `</div>
+            <div><a href="/api/v1/logs?format=json" class="api-link">📄 View JSON</a></div>
+        </div>
+        <div class="log-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 180px;">Timestamp</th>
+                        <th style="width: 80px;">Level</th>
+                        <th style="width: 150px;">Service</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>`
+
+	// Render log rows
+	for _, logEntry := range logs {
+		timestamp := logEntry["timestamp"]
+		logLevel := logEntry["level"]
+		logService := logEntry["service"]
+		logMessage := logEntry["message"]
+
+		html += fmt.Sprintf(`
+                    <tr>
+                        <td class="timestamp">%v</td>
+                        <td><span class="level level-%v">%v</span></td>
+                        <td class="service">%v</td>
+                        <td class="message">%v</td>
+                    </tr>`,
+			timestamp, logLevel, logLevel, logService, logMessage)
+	}
+
+	html += `
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>`
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
 func main() {

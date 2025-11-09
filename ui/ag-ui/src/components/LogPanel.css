@@ -6,6 +6,29 @@
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+  min-height: 300px;
+  resize: vertical;
+  transition: all 0.3s ease;
+}
+
+.log-panel.small {
+  flex: 0.5;
+  min-height: 200px;
+}
+
+.log-panel.normal {
+  flex: 1;
+  min-height: 300px;
+}
+
+.log-panel.large {
+  flex: 1.5;
+  min-height: 400px;
+}
+
+.log-panel.xlarge {
+  flex: 2.5;
+  min-height: 600px;
 }
 
 .log-panel-header {
@@ -15,6 +38,7 @@
   padding: 15px 20px;
   border-bottom: 1px solid #e0e0e0;
   background-color: #f8f9fa;
+  flex-shrink: 0;
 }
 
 .log-panel-header h3 {
@@ -99,5 +123,41 @@
   text-align: center;
   padding: 40px;
   color: #999;
+}
+
+.log-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.refresh-toggle, .refresh-button, .expand-button, .limit-select {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: white;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.limit-select {
+  min-width: 100px;
+}
+
+.refresh-toggle:hover, .refresh-button:hover, .expand-button:hover {
+  background-color: #f0f0f0;
+  border-color: #bbb;
+}
+
+.refresh-toggle.active {
+  background-color: #4caf50;
+  color: white;
+  border-color: #4caf50;
+}
+
+.expand-button {
+  min-width: 80px;
 }
 

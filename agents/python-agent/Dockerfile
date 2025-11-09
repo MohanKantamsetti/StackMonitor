@@ -4,6 +4,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
 
+# Copy proto files (build context is project root)
 COPY proto /proto
 
 RUN mkdir -p /app/proto
@@ -12,10 +13,11 @@ RUN pip install grpcio-tools
 
 RUN python -m grpc_tools.protoc -I/proto --python_out=/app/proto --grpc_python_out=/app/proto /proto/logs.proto /proto/config.proto
 
-COPY requirements.txt ./requirements.txt
+# Copy agent files
+COPY agents/python-agent/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY agent.py ./agent.py
+COPY agents/python-agent/agent.py ./agent.py
 
 FROM python:3.10-slim
 

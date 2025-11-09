@@ -1,0 +1,498 @@
+openapi: 3.0.3
+info:
+  title: StackMonitor API
+  description: |
+    StackMonitor provides a comprehensive log monitoring and analytics platform.
+    
+    ## Features
+    - **Real-time log ingestion** from multiple agents (Go, Python)
+    - **Advanced filtering** by service, level, timestamp
+    - **Statistical analysis** of log patterns
+    - **Error rate metrics** with time-series data
+    - **Live streaming** via WebSocket
+    - **Natural language queries** for log analytics
+    
+    ## Architecture
+    - **Agents**: Go and Python agents collect logs from various sources
+    - **Ingestion Service**: Receives, deduplicates, and stores logs in ClickHouse
+    - **API Server**: Provides REST and WebSocket endpoints for querying logs
+    - **ClickHouse**: High-performance columnar database for log storage
+    
+    ## Authentication
+    Currently, the API does not require authentication (POC mode).
+    
+  version: 1.0.0
+  contact:
+    name: StackMonitor Support
+    email: support@stackmonitor.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development server
+  - url: http://{host}:8080/api/v1
+    description: Custom host
+    variables:
+      host:
+        default: localhost
+        description: API server hostname or IP address
+
+tags:
+  - name: Logs
+    description: Log retrieval and querying operations
+  - name: Statistics
+    description: Log statistics and aggregations
+  - name: Metrics
+    description: Time-series metrics and analytics
+  - name: Query
+    description: Natural language and advanced querying
+  - name: Streaming
+    description: Real-time log streaming via WebSocket
+
+paths:
+  /logs:
+    get:
+      tags:
+        - Logs
+      summary: Retrieve logs with filters
+      description: |
+        Fetches logs from ClickHouse with optional filtering by service and level.
+        Returns logs in reverse chronological order (newest first).
+        
+        **HTML Rendering**: If `Accept: text/html` header is present or `format=html` query parameter is set,
+        returns a human-readable HTML table view with active filter badges and JSON link.
+      operationId: getLogs
+      parameters:
+        - name: service
+          in: query
+          description: Filter logs by service name (exact match)
+          required: false
+          schema:
+            type: string
+            example: payment-service
+        - name: level
+          in: query
+          description: Filter logs by severity level
+          required: false
+          schema:
+            type: string
+            enum: [ERROR, WARN, INFO, DEBUG]
+            example: ERROR
+        - name: limit
+          in: query
+          description: Maximum number of logs to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 100
+            example: 50
+        - name: format
+          in: query
+          description: Response format (json or html)
+          required: false
+          schema:
+            type: string
+            enum: [json, html]
+            default: json
+      responses:
+        '200':
+          description: Successful response with logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LogEntry'
+                  count:
+                    type: integer
+                    description: Number of logs returned
+                    example: 50
+              examples:
+                multipleServices:
+                  summary: Logs from multiple services
+                  value:
+                    logs:
+                      - timestamp: "2025-11-09T05:45:30Z"
+                        level: "ERROR"
+                        service: "payment-service"
+                        message: "Database timeout: host=db-replica-2, query=SELECT, timeout=5000ms"
+                        trace_id: "trace-abc123"
+                        agent_id: "go-agent-1"
+                      - timestamp: "2025-11-09T05:45:25Z"
+                        level: "WARN"
+                        service: "user-service"
+                        message: "Cache miss for key: user_1234"
+                        trace_id: ""
+                        agent_id: "python-agent-1"
+                    count: 2
+                errorLogs:
+                  summary: Filtered error logs
+                  value:
+                    logs:
+                      - timestamp: "2025-11-09T05:45:30Z"
+                        level: "ERROR"
+                        service: "payment-service"
+                        message: "Database timeout: host=db-replica-2, query=SELECT, timeout=5000ms"
+                        trace_id: "trace-abc123"
+                        agent_id: "go-agent-1"
+                    count: 1
+            text/html:
+              schema:
+                type: string
+                description: HTML table view of logs with filter badges
+              example: |
+                <!DOCTYPE html>
+                <html>
+                <head><title>StackMonitor Logs</title></head>
+                <body>
+                  <h1>StackMonitor Logs</h1>
+                  <div class="filters">
+                    <span class="badge">Level: ERROR</span>
+                    <span class="badge">Limit: 50</span>
+                  </div>
+                  <table>...</table>
+                </body>
+                </html>
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Query error: connection refused"
+
+  /logs/stats:
+    get:
+      tags:
+        - Statistics
+      summary: Get log statistics
+      description: |
+        Returns aggregate statistics for all logs in the database, including:
+        - Total log count
+        - Count of ERROR logs
+        - Count of WARN logs
+        - Count of INFO logs
+      operationId: getLogStats
+      responses:
+        '200':
+          description: Log statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    format: uint64
+                    description: Total number of logs
+                    example: 15876
+                  errors:
+                    type: integer
+                    format: uint64
+                    description: Number of ERROR logs
+                    example: 794
+                  warnings:
+                    type: integer
+                    format: uint64
+                    description: Number of WARN logs
+                    example: 2381
+                  info:
+                    type: integer
+                    format: uint64
+                    description: Number of INFO logs
+                    example: 12701
+              examples:
+                typical:
+                  summary: Typical statistics
+                  value:
+                    total: 15876
+                    errors: 794
+                    warnings: 2381
+                    info: 12701
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /metrics/error-rate:
+    get:
+      tags:
+        - Metrics
+      summary: Get error rate metrics over time
+      description: |
+        Returns time-series data of error counts, grouped by time intervals.
+        Useful for charting error trends and identifying spikes.
+        
+        **Time ranges**:
+        - `1h`: Last 1 hour, grouped by 1-minute intervals
+        - `24h`: Last 24 hours, grouped by 1-hour intervals (not fully implemented)
+      operationId: getErrorRateMetrics
+      parameters:
+        - name: service
+          in: query
+          description: Filter error metrics by service name
+          required: false
+          schema:
+            type: string
+            example: payment-service
+        - name: range
+          in: query
+          description: Time range for metrics
+          required: false
+          schema:
+            type: string
+            enum: ['1h', '24h']
+            default: '1h'
+      responses:
+        '200':
+          description: Error rate metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  metrics:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MetricPoint'
+              examples:
+                errorSpike:
+                  summary: Error spike detected
+                  value:
+                    metrics:
+                      - time: "2025-11-09T05:40:00Z"
+                        count: 5
+                      - time: "2025-11-09T05:41:00Z"
+                        count: 12
+                      - time: "2025-11-09T05:42:00Z"
+                        count: 45
+                      - time: "2025-11-09T05:43:00Z"
+                        count: 8
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /query:
+    post:
+      tags:
+        - Query
+      summary: Natural language query
+      description: |
+        Accepts a natural language query and returns structured results.
+        Currently supports keyword-based parsing for:
+        - Error queries: Returns error counts by service
+        
+        **Note**: This is a simplified implementation. Production version would use
+        an LLM (like Google Gemini) for more sophisticated query understanding.
+      operationId: naturalLanguageQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: Natural language query
+                  example: "Show me errors from the last hour"
+            examples:
+              errorQuery:
+                summary: Query for errors
+                value:
+                  query: "Show me errors from the last hour"
+              serviceQuery:
+                summary: Query for specific service
+                value:
+                  query: "What errors are happening in payment-service?"
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query:
+                    type: string
+                    description: Original query
+                  results:
+                    type: object
+                    description: Structured query results
+                    additionalProperties: true
+              examples:
+                errorResults:
+                  summary: Error query results
+                  value:
+                    query: "Show me errors from the last hour"
+                    results:
+                      errors_by_service:
+                        - service: "payment-service"
+                          count: 45
+                        - service: "user-service"
+                          count: 12
+                        - service: "api-gateway"
+                          count: 8
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid request"
+
+  /logs/stream:
+    get:
+      tags:
+        - Streaming
+      summary: WebSocket stream for live logs
+      description: |
+        Establishes a WebSocket connection for real-time log streaming.
+        The server continuously queries ClickHouse for new logs and pushes them to connected clients.
+        
+        **Protocol**: WebSocket (ws://)
+        **Message Format**: JSON array of LogEntry objects
+        **Interval**: Every 2 seconds
+        
+        **Connection Upgrade**:
+        ```
+        GET /api/v1/logs/stream HTTP/1.1
+        Host: localhost:8080
+        Upgrade: websocket
+        Connection: Upgrade
+        Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==
+        Sec-WebSocket-Version: 13
+        ```
+      operationId: streamLogs
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket connection established
+          headers:
+            Upgrade:
+              schema:
+                type: string
+                example: websocket
+            Connection:
+              schema:
+                type: string
+                example: Upgrade
+        '400':
+          description: WebSocket upgrade failed
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "WebSocket upgrade failed: invalid headers"
+
+components:
+  schemas:
+    LogEntry:
+      type: object
+      description: A single log entry from ClickHouse
+      required:
+        - timestamp
+        - level
+        - service
+        - message
+        - agent_id
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the log event
+          example: "2025-11-09T05:45:30Z"
+        level:
+          type: string
+          enum: [ERROR, WARN, INFO, DEBUG]
+          description: Log severity level
+          example: "ERROR"
+        service:
+          type: string
+          description: Service that generated the log
+          example: "payment-service"
+        message:
+          type: string
+          description: Log message content
+          example: "Database timeout: host=db-replica-2, query=SELECT, timeout=5000ms"
+        trace_id:
+          type: string
+          description: Distributed trace ID (if available)
+          example: "trace-abc123"
+          nullable: true
+        agent_id:
+          type: string
+          description: ID of the agent that collected this log
+          example: "go-agent-1"
+      example:
+        timestamp: "2025-11-09T05:45:30Z"
+        level: "ERROR"
+        service: "payment-service"
+        message: "Database timeout: host=db-replica-2, query=SELECT, timeout=5000ms"
+        trace_id: "trace-abc123"
+        agent_id: "go-agent-1"
+
+    MetricPoint:
+      type: object
+      description: A single point in a time-series metric
+      required:
+        - time
+        - count
+      properties:
+        time:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the metric bucket
+          example: "2025-11-09T05:40:00Z"
+        count:
+          type: integer
+          format: uint64
+          description: Count of events in this time bucket
+          example: 45
+      example:
+        time: "2025-11-09T05:40:00Z"
+        count: 45
+
+    Error:
+      type: object
+      description: Error response
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Query error: connection refused"
+
+  securitySchemes:
+    # Placeholder for future authentication
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT-based authentication (not currently implemented).
+        Future implementation will require a bearer token in the Authorization header.
+
+# No security applied by default (POC mode)
+# security: []
+
+externalDocs:
+  description: StackMonitor Documentation
+  url: https://github.com/yourusername/stackmonitor-poc
+
